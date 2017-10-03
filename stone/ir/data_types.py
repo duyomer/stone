@@ -571,6 +571,20 @@ class Field(object):
         self.raw_doc = doc
         self.doc = doc_unwrap(doc)
         self._ast_node = ast_node
+        self.omission_group = None
+
+    def set_annotations(self, annotations):
+        for annotation in annotations:
+            if isinstance(annotation, Omission):
+                if self.omission_group:
+                    raise InvalidSpec("Omission Group already set as %r" %
+                                      self.omission_group, self._ast_node.lineno)
+                self.omission_group = annotation
+                self.doc = 'Field is only returned for "{}" callers. {}'.format(
+                    self.omission_group.group_name, self.doc)
+            else:
+                raise InvalidSpec(
+                    'Annotation %r not recognized for field.' % annotation, self._ast_node.lineno)
 
     def __repr__(self):
         return 'Field(%r, %r)' % (self.name,
@@ -586,8 +600,7 @@ class StructField(Field):
                  name,
                  data_type,
                  doc,
-                 ast_node,
-                 deprecated=False):
+                 ast_node):
         """
         Creates a new Field.
 
@@ -596,10 +609,8 @@ class StructField(Field):
         :param str doc: Documentation for the field.
         :param ast_node: Raw field definition from the parser.
         :type ast_node: stone.frontend.ast.AstField
-        :param bool deprecated: Whether the field is deprecated.
         """
         super(StructField, self).__init__(name, data_type, doc, ast_node)
-        self.deprecated = deprecated
         self.has_default = False
         self._default = None
 
@@ -628,8 +639,9 @@ class StructField(Field):
         return attr
 
     def __repr__(self):
-        return 'StructField(%r, %r)' % (self.name,
-                                        self.data_type)
+        return 'StructField(%r, %r, %r)' % (self.name,
+                                            self.data_type,
+                                            self.omission_group)
 
 
 class UnionField(Field):
@@ -647,9 +659,10 @@ class UnionField(Field):
         self.catch_all = catch_all
 
     def __repr__(self):
-        return 'UnionField(%r, %r, %r)' % (self.name,
-                                           self.data_type,
-                                           self.catch_all)
+        return 'UnionField(%r, %r, %r, %r)' % (self.name,
+                                               self.data_type,
+                                               self.catch_all,
+                                               self.omission_group)
 
 
 class UserDefined(Composite):
@@ -750,6 +763,10 @@ class UserDefined(Composite):
             if field.doc:
                 return True
         return False
+
+    def get_omission_groups(self):
+        """Returns all unique omission groups for objects fields."""
+        return {field.omission_group.group_name for field in self.fields if field.omission_group}
 
     @property
     def name(self):
@@ -1532,6 +1549,31 @@ class TagRef(object):
         return 'TagRef(%r, %r)' % (self.union_data_type, self.tag_name)
 
 
+class Annotation(object):
+    """
+    Used when a field is annotated for redaction or omission.
+    """
+    def __init__(self, name, namespace, token):
+        self.name = name
+        self.namespace = namespace
+        self._token = token
+
+    def __repr__(self):
+        return 'Annotation(%r, %r)' % (self.name, self.namespace)
+
+
+class Omission(Annotation):
+    """
+    Used when a field is annotated for redaction.
+    """
+    def __init__(self, name, namespace, token, group_name):
+        super(Omission, self).__init__(name, namespace, token)
+        self.group_name = group_name
+
+    def __repr__(self):
+        return 'Omission(%r, %r)' % (self.name, self.group_name)
+
+
 class Alias(Composite):
     """
     NOTE: The categorization of aliases as a composite type is arbitrary.
@@ -1559,6 +1601,11 @@ class Alias(Composite):
         self.raw_doc = None
         self.doc = None
         self.data_type = None
+
+    def set_annotations(self, annotations):
+        for annotation in annotations:
+            raise InvalidSpec("Aliases don't support %r" %
+                              annotation, self._token.lineno)
 
     def set_attributes(self, doc, data_type):
         """

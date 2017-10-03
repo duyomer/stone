@@ -32,6 +32,7 @@ from ..ir import (
     List,
     Map,
     Nullable,
+    Omission,
     ParameterError,
     String,
     Struct,
@@ -50,6 +51,7 @@ from ..ir import (
 from .exception import InvalidSpec
 from .ast import (
     AstAlias,
+    AstAnnotationDef,
     AstImport,
     AstNamespace,
     AstRouteDef,
@@ -72,6 +74,11 @@ def quote(s):
 doc_ref_re = re.compile(r':(?P<tag>[A-z]+):`(?P<val>.*?)`')
 doc_ref_val_re = re.compile(
     r'^(null|true|false|-?\d+(\.\d*)?(e-?\d+)?|"[^\\"]*")$')
+
+# Defined Annotations
+ANNOTATION_CLASS_BY_STRING = {
+    'Omission': Omission,
+}
 
 
 class Environment(dict):
@@ -150,6 +157,7 @@ class IRGenerator(object):
         self._populate_route_attributes()
         self._populate_examples()
         self._validate_doc_refs()
+        self._validate_annotations()
 
         self.api.normalize()
 
@@ -301,6 +309,25 @@ class IRGenerator(object):
         env[item.name] = alias
         return alias
 
+    def _create_annotation(self, env, item):
+        if item.name in env:
+            existing_dt = env[item.name]
+            raise InvalidSpec(
+                'Symbol %s already defined (%s:%d).' %
+                (quote(item.name), existing_dt._ast_node.path,
+                existing_dt._ast_node.lineno), item.lineno, item.path)
+
+        namespace = self.api.ensure_namespace(env.namespace_name)
+
+        if item.annotation_type not in ANNOTATION_CLASS_BY_STRING:
+            raise InvalidSpec('Unknown Annotation type %s.' %
+                              item.annotation_type, item.lineno, item.path)
+
+        annotation_class = ANNOTATION_CLASS_BY_STRING[item.annotation_type]
+        annotation = annotation_class(item.name, namespace, item, *item.args)
+        env[item.name] = annotation
+        return annotation
+
     def _create_type(self, env, item):
         """Create a forward reference for a union or struct."""
         if item.name in env:
@@ -402,6 +429,9 @@ class IRGenerator(object):
             for alias in namespace.aliases:
                 data_type = self._resolve_type(env, alias._ast_node.type_ref)
                 alias.set_attributes(alias._ast_node.doc, data_type)
+                annotations = [self._resolve_annotation_type(env, annotation)
+                               for annotation in alias._ast_node.annotations]
+                alias.set_annotations(annotations)
 
             for data_type in namespace.data_types:
                 if not data_type._is_forward_ref:
@@ -618,6 +648,9 @@ class IRGenerator(object):
                 stone_field.lineno, stone_field.path)
 
         data_type = self._resolve_type(env, stone_field.type_ref)
+        annotations = [self._resolve_annotation_type(env, annotation)
+                       for annotation in stone_field.annotations]
+
         if isinstance(data_type, Void):
             raise InvalidSpec(
                 'Struct field %s cannot have a Void type.' %
@@ -633,8 +666,8 @@ class IRGenerator(object):
             data_type=data_type,
             doc=stone_field.doc,
             ast_node=stone_field,
-            deprecated=stone_field.deprecated,
         )
+        api_type_field.set_annotations(annotations)
         return api_type_field
 
     def _create_union_field(self, env, stone_field):
@@ -649,6 +682,9 @@ class IRGenerator(object):
         Returns:
             stone.data_type.UnionField: A field of a union.
         """
+        annotations = [self._resolve_annotation_type(env, annotation)
+                       for annotation in stone_field.annotations]
+
         if isinstance(stone_field, AstVoidField):
             api_type_field = UnionField(
                 name=stone_field.name, data_type=Void(), doc=stone_field.doc,
@@ -663,6 +699,7 @@ class IRGenerator(object):
             api_type_field = UnionField(
                 name=stone_field.name, data_type=data_type,
                 doc=stone_field.doc, ast_node=stone_field)
+        api_type_field.set_annotations(annotations)
         return api_type_field
 
     def _instantiate_data_type(self, data_type_class, data_type_args, loc):
@@ -813,6 +850,26 @@ class IRGenerator(object):
             data_type = Nullable(data_type)
 
         return data_type
+
+    def _resolve_annotation_type(self, env, annotation_ref):
+        """
+        Resolves the annotation type referenced by annotation_ref.
+        """
+        loc = annotation_ref.lineno, annotation_ref.path
+        if annotation_ref.ns:
+            if annotation_ref.ns not in env:
+                raise InvalidSpec(
+                    'Namespace %s is not imported' % quote(annotation_ref.ns), *loc)
+            env = env[annotation_ref.ns]
+            if not isinstance(env, Environment):
+                raise InvalidSpec(
+                    '%s is not a namespace.' % quote(annotation_ref.ns), *loc)
+
+        if annotation_ref.annotation not in env:
+            raise InvalidSpec(
+                'Symbol %s is undefined.' % quote(annotation_ref.annotation), *loc)
+
+        return env[annotation_ref.annotation]
 
     def _resolve_args(self, env, args):
         """
@@ -1062,6 +1119,36 @@ class IRGenerator(object):
                 raise InvalidSpec(
                     'Unknown doc reference tag %s.' % quote(tag),
                     *loc)
+
+    def _validate_annotations(self):
+        """
+        Validates that all annotations are attached to proper types and that no field
+        has conflicting inherited or direct annotations. We need to go through all reference
+        chains to make sure we don't override a redactor set on a parent alias or type
+        """
+        for namespace in self.api.namespaces.values():
+            for data_type in namespace.data_types:
+                for field in data_type.fields:
+                    pass
+
+            for alias in namespace.aliases:
+                pass
+
+
+    def _validate_object_can_be_annotated(self, annotated_object):
+        """
+        Validates that object type can be annotated and object does not have
+        conflicting annotations.
+        """
+        data_type = annotated_object.data_type
+        name = annotated_object.name
+        loc = annotated_object._ast_node.lineno, annotated_object._ast_node.path
+        while isinstance(data_type, Alias) or isinstance(data_type, Nullable):
+            if hasattr(data_type, 'omission_group') and data_type.omission_group:
+                raise InvalidSpec('An omission group has already been defined for %s by %s' %
+                                  (name, data_type.name), *loc)
+
+            data_type = data_type.data_type
 
     def _validate_stone_cfg(self):
         """

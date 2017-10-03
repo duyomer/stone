@@ -12,6 +12,8 @@ from .lexer import (
 
 from .ast import (
     AstAlias,
+    AstAnnotationDef,
+    AstAnnotationRef,
     AstAttrField,
     AstExample,
     AstExampleField,
@@ -166,12 +168,20 @@ class ParserFactory(object):
         p[0] = AstImport(self.path, p.lineno(1), p.lexpos(1), p[2])
 
     def p_alias(self, p):
-        """alias : KEYWORD ID EQ type_ref NL
-                 | KEYWORD ID EQ type_ref NL INDENT docsection DEDENT"""
+        """alias : alias_no_annotations
+                 | annotation_ref_list alias_no_annotations"""
+        if len(p) > 2:
+            p[0] = p[2]
+            p[0].set_annotations(p[1])
+        else:
+            p[0] = p[1]
+
+    def p_alias_no_annotations(self, p):
+        """alias_no_annotations : KEYWORD ID EQ type_ref NL
+                                | KEYWORD ID EQ type_ref NL INDENT docsection DEDENT"""
         if p[1] == 'alias':
             doc = p[7] if len(p) > 6 else None
-            p[0] = AstAlias(
-                self.path, p.lineno(1), p.lexpos(1), p[2], p[4], doc)
+            p[0] = AstAlias(self.path, p.lineno(1), p.lexpos(1), p[2], p[4], doc)
         else:
             raise ValueError('Expected alias keyword')
 
@@ -387,7 +397,7 @@ class ParserFactory(object):
     # Fields
     #
     # Each struct has zero or more fields. A field has a name, type,
-    # and docstring. The "deprecated" keyword is currently unused.
+    # and docstring.
     #
     # TODO(kelkabany): Split fields into struct fields and union fields
     # since they differ in capabilities rather significantly now.
@@ -405,11 +415,6 @@ class ParserFactory(object):
         p[0] = p[1]
         p[0].append(p[2])
 
-    def p_field_deprecation(self, p):
-        """deprecation : DEPRECATED
-                       | empty"""
-        p[0] = (p[1] == 'deprecated')
-
     def p_default_option(self, p):
         """default_option : EQ primitive
                           | EQ tag_ref
@@ -421,23 +426,32 @@ class ParserFactory(object):
                 p[0] = p[2]
 
     def p_field(self, p):
-        """field : ID type_ref default_option deprecation NL \
-                    INDENT docsection anony_def_option DEDENT
-                 | ID type_ref default_option deprecation NL"""
-        has_docstring = len(p) > 6 and p[7] is not None
-        has_anony_def = len(p) > 6 and p[8] is not None
+        """field : field_no_annotations
+                 | annotation_ref_list field_no_annotations"""
+        if len(p) > 2:
+            p[0] = p[2]
+            p[0].set_annotations(p[1])
+        else:
+            p[0] = p[1]
+
+    def p_field_no_annotations(self, p):
+        """field_no_annotations : ID type_ref default_option NL \
+                                  INDENT docsection anony_def_option DEDENT
+                                | ID type_ref default_option NL"""
+        has_docstring = len(p) > 6 and p[6] is not None
+        has_anony_def = len(p) > 6 and p[7] is not None
         p[0] = AstField(
-            self.path, p.lineno(1), p.lexpos(1), p[1], p[2], p[4])
+            self.path, p.lineno(1), p.lexpos(1), p[1], p[2])
         if p[3] is not None:
             if p[3] is NullToken:
                 p[0].set_default(None)
             else:
                 p[0].set_default(p[3])
         if has_docstring:
-            p[0].set_doc(p[7])
+            p[0].set_doc(p[6])
         if has_anony_def:
-            p[8].name = p[2].name
-            self.anony_defs.append(p[8])
+            p[7].name = p[2].name
+            self.anony_defs.append(p[7])
 
     def p_anony_def_option(self, p):
         """anony_def_option : anony_def
@@ -447,6 +461,31 @@ class ParserFactory(object):
     def p_tag_ref(self, p):
         'tag_ref : ID'
         p[0] = AstTagRef(self.path, p.lineno(1), p.lexpos(1), p[1])
+
+    def p_annotation(self, p):
+        """annotation : ANNOTATION ID EQ ID args NL"""
+        args, kwargs = p[5]
+        p[0] = AstAnnotationDef(self.path, p.lineno(1), p.lexpos(1), p[2], p[4], args, kwargs)
+
+    def p_annotation_ref_list_create(self, p):
+        """annotation_ref_list : annotation_ref"""
+
+        p[0] = [p[1]]
+
+    def p_annotation_ref_list_extend(self, p):
+        """annotation_ref_list : annotation_ref_list annotation_ref"""
+
+        p[0] = p[1]
+        p[0].append(p[2])
+
+    def p_annotation_ref(self, p):
+        """annotation_ref : AT ID NL
+                          | AT ID DOT ID NL"""
+
+        if len(p) < 5:
+            p[0] = AstAnnotationRef(self.path, p.lineno(1), p.lexpos(1), p[2], None)
+        else:
+            p[0] = AstAnnotationRef(self.path, p.lineno(1), p.lexpos(1), p[4], p[2])
 
     # --------------------------------------------------------------
     # Unions
@@ -500,9 +539,9 @@ class ParserFactory(object):
                   | UNION_CLOSED"""
         p[0] = (p[1], p.lineno(1), p.lexpos(1))
 
-    def p_field_void(self, p):
-        """field : ID NL
-                 | ID NL INDENT docstring NL DEDENT"""
+    def p_field_void_no_annotations(self, p):
+        """field_no_annotations : ID NL
+                                | ID NL INDENT docstring NL DEDENT"""
         p[0] = AstVoidField(self.path, p.lineno(1), p.lexpos(1), p[1])
         if len(p) > 4:
             p[0].set_doc(p[4])

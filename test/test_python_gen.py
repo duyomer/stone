@@ -14,10 +14,19 @@ import unittest
 import stone.backends.python_rsrc.stone_validators as bv
 
 from stone.backends.python_rsrc.stone_serializers import (
+    CallerPermissions,
     json_encode,
     json_decode,
     _strftime as stone_strftime,
 )
+
+
+def _json_encode_wrapper(*arg):
+    json_encode(arg, CallerPermissions())
+
+
+def _json_decode_wrapper(*arg):
+    json_decode(arg, CallerPermissions())
 
 
 class TestDropInModules(unittest.TestCase):
@@ -143,7 +152,7 @@ class TestDropInModules(unittest.TestCase):
         t.validate(now)
         then = datetime.datetime(1776, 7, 4, 12, 0, 0)
         t.validate(then)
-        new_then = json_decode(t, json_encode(t, then))
+        new_then = _json_decode_wrapper(t, _json_encode_wrapper(t, then))
         self.assertEqual(then, new_then)
         # Accept a tzinfo only if it's UTC
         t.validate(now.replace(tzinfo=UTC()))
@@ -206,23 +215,23 @@ class TestDropInModules(unittest.TestCase):
         self.assertRaises(bv.ValidationError, lambda: s.validate(object()))
 
     def test_json_encoder(self):
-        self.assertEqual(json_encode(bv.Void(), None), json.dumps(None))
-        self.assertEqual(json_encode(bv.String(), 'abc'), json.dumps('abc'))
-        self.assertEqual(json_encode(bv.String(), u'\u2650'), json.dumps(u'\u2650'))
-        self.assertEqual(json_encode(bv.UInt32(), 123), json.dumps(123))
+        self.assertEqual(_json_encode_wrapper(bv.Void(), None), json.dumps(None))
+        self.assertEqual(_json_encode_wrapper(bv.String(), 'abc'), json.dumps('abc'))
+        self.assertEqual(_json_encode_wrapper(bv.String(), u'\u2650'), json.dumps(u'\u2650'))
+        self.assertEqual(_json_encode_wrapper(bv.UInt32(), 123), json.dumps(123))
         # Because a bool is a subclass of an int, ensure they aren't mistakenly
         # encoded as a true/false in JSON when an integer is the data type.
-        self.assertEqual(json_encode(bv.UInt32(), True), json.dumps(1))
-        self.assertEqual(json_encode(bv.Boolean(), True), json.dumps(True))
+        self.assertEqual(_json_encode_wrapper(bv.UInt32(), True), json.dumps(1))
+        self.assertEqual(_json_encode_wrapper(bv.Boolean(), True), json.dumps(True))
         f = '%a, %d %b %Y %H:%M:%S +0000'
         now = datetime.datetime.utcnow()
-        self.assertEqual(json_encode(bv.Timestamp('%a, %d %b %Y %H:%M:%S +0000'), now),
+        self.assertEqual(_json_encode_wrapper(bv.Timestamp('%a, %d %b %Y %H:%M:%S +0000'), now),
                          json.dumps(now.strftime(f)))
         b = b'\xff' * 5
-        self.assertEqual(json_encode(bv.Bytes(), b),
+        self.assertEqual(_json_encode_wrapper(bv.Bytes(), b),
                          json.dumps(base64.b64encode(b).decode('ascii')))
-        self.assertEqual(json_encode(bv.Nullable(bv.String()), None), json.dumps(None))
-        self.assertEqual(json_encode(bv.Nullable(bv.String()), u'abc'), json.dumps('abc'))
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.String()), None), json.dumps(None))
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.String()), u'abc'), json.dumps('abc'))
 
     def test_json_encoder_union(self):
         # pylint: disable=attribute-defined-outside-init
@@ -258,12 +267,12 @@ class TestDropInModules(unittest.TestCase):
 
         # Test primitive variant
         u = U('a', 64)
-        self.assertEqual(json_encode(bv.Union(U), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Union(U), u, old_style=True),
                          json.dumps({'a': 64}))
 
         # Test symbol variant
         u = U('b')
-        self.assertEqual(json_encode(bv.Union(U), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Union(U), u, old_style=True),
                          json.dumps('b'))
 
         # Test struct variant
@@ -271,46 +280,46 @@ class TestDropInModules(unittest.TestCase):
         c.f = 'hello'
         c._f_present = True
         u = U('c', c)
-        self.assertEqual(json_encode(bv.Union(U), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Union(U), u, old_style=True),
                          json.dumps({'c': {'f': 'hello'}}))
 
         # Test list variant
         u = U('d', [1, 2, 3, 'a'])
         # lists should be re-validated during serialization
-        self.assertRaises(bv.ValidationError, lambda: json_encode(bv.Union(U), u))
+        self.assertRaises(bv.ValidationError, lambda: _json_encode_wrapper(bv.Union(U), u))
         l = [1, 2, 3, 4]
         u = U('d', [1, 2, 3, 4])
-        self.assertEqual(json_encode(bv.Union(U), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Union(U), u, old_style=True),
                          json.dumps({'d': l}))
 
         # Test a nullable union
-        self.assertEqual(json_encode(bv.Nullable(bv.Union(U)), None),
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.Union(U)), None),
                          json.dumps(None))
-        self.assertEqual(json_encode(bv.Nullable(bv.Union(U)), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.Union(U)), u, old_style=True),
                          json.dumps({'d': l}))
 
         # Test nullable primitive variant
         u = U('e', None)
-        self.assertEqual(json_encode(bv.Nullable(bv.Union(U)), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.Union(U)), u, old_style=True),
                          json.dumps('e'))
         u = U('e', 64)
-        self.assertEqual(json_encode(bv.Nullable(bv.Union(U)), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.Union(U)), u, old_style=True),
                          json.dumps({'e': 64}))
 
         # Test nullable composite variant
         u = U('f', None)
-        self.assertEqual(json_encode(bv.Nullable(bv.Union(U)), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.Union(U)), u, old_style=True),
                          json.dumps('f'))
         u = U('f', c)
-        self.assertEqual(json_encode(bv.Nullable(bv.Union(U)), u, old_style=True),
+        self.assertEqual(_json_encode_wrapper(bv.Nullable(bv.Union(U)), u, old_style=True),
                          json.dumps({'f': {'f': 'hello'}}))
 
         u = U('g', {'one': 2})
-        self.assertRaises(bv.ValidationError, lambda: json_encode(bv.Union(U), u))
+        self.assertRaises(bv.ValidationError, lambda: _json_encode_wrapper(bv.Union(U), u))
 
         m = {'one': 'two'}
         u = U('g', m)
-        self.assertEqual(json_encode(bv.Union(U), u, old_style=True), json.dumps({'g': m}))
+        self.assertEqual(_json_encode_wrapper(bv.Union(U), u, old_style=True), json.dumps({'g': m}))
 
     def test_json_encoder_error_messages(self):
         # pylint: disable=attribute-defined-outside-init
@@ -349,7 +358,7 @@ class TestDropInModules(unittest.TestCase):
         # Test that validation error references outer and inner struct
         with self.assertRaises(bv.ValidationError):
             try:
-                json_encode(bv.Struct(S), s)
+                _json_encode_wrapper(bv.Struct(S), s)
             except bv.ValidationError as e:
                 prefix = 'f.i: '
                 self.assertEqual(prefix, str(e)[:len(prefix)])
@@ -360,48 +369,48 @@ class TestDropInModules(unittest.TestCase):
         # Test that validation error references outer union and inner structs
         with self.assertRaises(bv.ValidationError):
             try:
-                json_encode(bv.Union(U), u)
+                _json_encode_wrapper(bv.Union(U), u)
             except bv.ValidationError as e:
                 prefix = 't.f.i: '
                 self.assertEqual(prefix, str(e)[:len(prefix)])
                 raise
 
     def test_json_decoder(self):
-        self.assertEqual(json_decode(bv.String(), json.dumps('abc')), 'abc')
+        self.assertEqual(_json_decode_wrapper(bv.String(), json.dumps('abc')), 'abc')
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.String(), json.dumps(32)))
+                          lambda: _json_decode_wrapper(bv.String(), json.dumps(32)))
 
-        self.assertEqual(json_decode(bv.UInt32(), json.dumps(123)), 123)
+        self.assertEqual(_json_decode_wrapper(bv.UInt32(), json.dumps(123)), 123)
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.UInt32(), json.dumps('hello')))
+                          lambda: _json_decode_wrapper(bv.UInt32(), json.dumps('hello')))
 
-        self.assertEqual(json_decode(bv.Boolean(), json.dumps(True)), True)
+        self.assertEqual(_json_decode_wrapper(bv.Boolean(), json.dumps(True)), True)
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Boolean(), json.dumps(1)))
+                          lambda: _json_decode_wrapper(bv.Boolean(), json.dumps(1)))
 
         f = '%a, %d %b %Y %H:%M:%S +0000'
         now = datetime.datetime.utcnow().replace(microsecond=0)
-        self.assertEqual(json_decode(bv.Timestamp('%a, %d %b %Y %H:%M:%S +0000'),
+        self.assertEqual(_json_decode_wrapper(bv.Timestamp('%a, %d %b %Y %H:%M:%S +0000'),
                                      json.dumps(now.strftime(f))),
                          now)
         # Try decoding timestamp with bad type
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Timestamp('%a, %d %b %Y %H:%M:%S +0000'), '1'))
+                          lambda: _json_decode_wrapper(bv.Timestamp('%a, %d %b %Y %H:%M:%S +0000'), '1'))
         b = b'\xff' * 5
-        self.assertEqual(json_decode(bv.Bytes(),
+        self.assertEqual(_json_decode_wrapper(bv.Bytes(),
                                      json.dumps(base64.b64encode(b).decode('ascii'))),
                          b)
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Bytes(), json.dumps(1)))
-        self.assertEqual(json_decode(bv.Nullable(bv.String()), json.dumps(None)), None)
-        self.assertEqual(json_decode(bv.Nullable(bv.String()), json.dumps('abc')), 'abc')
+                          lambda: _json_decode_wrapper(bv.Bytes(), json.dumps(1)))
+        self.assertEqual(_json_decode_wrapper(bv.Nullable(bv.String()), json.dumps(None)), None)
+        self.assertEqual(_json_decode_wrapper(bv.Nullable(bv.String()), json.dumps('abc')), 'abc')
 
-        self.assertEqual(json_decode(bv.Void(), json.dumps(None)), None)
+        self.assertEqual(_json_decode_wrapper(bv.Void(), json.dumps(None)), None)
         # Check that void can take any input if strict is False.
-        self.assertEqual(json_decode(bv.Void(), json.dumps(12345), strict=False), None)
+        self.assertEqual(_json_decode_wrapper(bv.Void(), json.dumps(12345), strict=False), None)
         # Check that an error is raised if strict is True and there's a non-null value
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Void(), json.dumps(12345), strict=True))
+                          lambda: _json_decode_wrapper(bv.Void(), json.dumps(12345), strict=True))
 
     def test_json_decoder_struct(self):
         class S(object):
@@ -428,18 +437,18 @@ class TestDropInModules(unittest.TestCase):
 
         # Required struct fields must be present
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Struct(S), json.dumps({})))
-        json_decode(bv.Struct(S), json.dumps({'f': 't'}))
+                          lambda: _json_decode_wrapper(bv.Struct(S), json.dumps({})))
+        _json_decode_wrapper(bv.Struct(S), json.dumps({'f': 't'}))
 
         # Struct fields can have null values for nullable fields
         msg = json.dumps({'f': 't', 'g': None})
-        json_decode(bv.Struct(S), msg)
+        _json_decode_wrapper(bv.Struct(S), msg)
 
         # Unknown struct fields raise error if strict
         msg = json.dumps({'f': 't', 'z': 123})
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Struct(S), msg, strict=True))
-        json_decode(bv.Struct(S), msg, strict=False)
+                          lambda: _json_decode_wrapper(bv.Struct(S), msg, strict=True))
+        _json_decode_wrapper(bv.Struct(S), msg, strict=False)
 
     def test_json_decoder_union(self):
         class S(object):
@@ -480,63 +489,63 @@ class TestDropInModules(unittest.TestCase):
         # pylint: disable=no-member,useless-suppression
 
         # Test primitive variant
-        u = json_decode(bv.Union(U), json.dumps({'a': 64}), old_style=True)
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'a': 64}), old_style=True)
         self.assertEqual(u.get_a(), 64)
 
         # Test void variant
-        u = json_decode(bv.Union(U), json.dumps('b'))
+        u = _json_decode_wrapper(bv.Union(U), json.dumps('b'))
         self.assertEqual(u._tag, 'b')
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Union(U), json.dumps({'b': [1, 2]})))
-        u = json_decode(bv.Union(U), json.dumps({'b': [1, 2]}), strict=False, old_style=True)
+                          lambda: _json_decode_wrapper(bv.Union(U), json.dumps({'b': [1, 2]})))
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'b': [1, 2]}), strict=False, old_style=True)
         self.assertEqual(u._tag, 'b')
 
         # Test struct variant
-        u = json_decode(bv.Union(U), json.dumps({'c': {'f': 'hello'}}), old_style=True)
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'c': {'f': 'hello'}}), old_style=True)
         self.assertEqual(u.get_c().f, 'hello')
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Union(U), json.dumps({'c': [1, 2, 3]})))
+                          lambda: _json_decode_wrapper(bv.Union(U), json.dumps({'c': [1, 2, 3]})))
 
         # Test list variant
         l = [1, 2, 3, 4]
-        u = json_decode(bv.Union(U), json.dumps({'d': l}), old_style=True)
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'d': l}), old_style=True)
         self.assertEqual(u.get_d(), l)
 
         # Test map variant
         m = {'one': 'two', 'three': 'four'}
-        u = json_decode(bv.Union(U), json.dumps({'h': m}), old_style=True)
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'h': m}), old_style=True)
         self.assertEqual(u.get_d(), m)
 
         # Raises if unknown tag
-        self.assertRaises(bv.ValidationError, lambda: json_decode(bv.Union(U), json.dumps('z')))
+        self.assertRaises(bv.ValidationError, lambda: _json_decode_wrapper(bv.Union(U), json.dumps('z')))
 
         # Unknown variant (strict=True)
         self.assertRaises(bv.ValidationError,
-                          lambda: json_decode(bv.Union(U), json.dumps({'z': 'test'})))
+                          lambda: _json_decode_wrapper(bv.Union(U), json.dumps({'z': 'test'})))
 
         # Test catch all variant
-        u = json_decode(bv.Union(U), json.dumps({'z': 'test'}),
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'z': 'test'}),
                         strict=False, old_style=True)
         self.assertEqual(u._tag, 'g')
 
         # Test nullable union
-        u = json_decode(bv.Nullable(bv.Union(U)), json.dumps(None),
+        u = _json_decode_wrapper(bv.Nullable(bv.Union(U)), json.dumps(None),
                         strict=False, old_style=True)
         self.assertEqual(u, None)
 
         # Test nullable union member
-        u = json_decode(bv.Union(U), json.dumps('e'))
+        u = _json_decode_wrapper(bv.Union(U), json.dumps('e'))
         self.assertEqual(u._tag, 'e')
         self.assertEqual(u._value, None)
-        u = json_decode(bv.Union(U), json.dumps({'e': 64}),
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'e': 64}),
                         strict=False, old_style=True)
         self.assertEqual(u._tag, 'e')
         self.assertEqual(u._value, 64)
 
         # Test nullable composite variant
-        u = json_decode(bv.Union(U), json.dumps('f'))
+        u = _json_decode_wrapper(bv.Union(U), json.dumps('f'))
         self.assertEqual(u._tag, 'f')
-        u = json_decode(bv.Union(U), json.dumps({'f': {'f': 'hello'}}),
+        u = _json_decode_wrapper(bv.Union(U), json.dumps({'f': {'f': 'hello'}}),
                         strict=False, old_style=True)
         self.assertEqual(type(u._value), S)
         self.assertEqual(u._value.f, 'hello')
@@ -569,7 +578,7 @@ class TestDropInModules(unittest.TestCase):
         # Test that validation error references outer and inner struct
         with self.assertRaises(bv.ValidationError):
             try:
-                json_decode(bv.Struct(S), json.dumps({'f': {'i': {}}}), strict=False)
+                _json_decode_wrapper(bv.Struct(S), json.dumps({'f': {'i': {}}}), strict=False)
             except bv.ValidationError as e:
                 prefix = 'f.i: '
                 self.assertEqual(prefix, str(e)[:len(prefix)])
@@ -578,7 +587,7 @@ class TestDropInModules(unittest.TestCase):
         # Test that validation error references outer union and inner structs
         with self.assertRaises(bv.ValidationError):
             try:
-                json_decode(bv.Union(U), json.dumps({'t': {'f': {'i': {}}}}),
+                _json_decode_wrapper(bv.Union(U), json.dumps({'t': {'f': {'i': {}}}}),
                             strict=False, old_style=True)
             except bv.ValidationError as e:
                 prefix = 't.f.i: '
